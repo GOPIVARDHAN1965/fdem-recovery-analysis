@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FDEM Data Architecture</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0B1623; font-family: Calibri, Arial, sans-serif; overflow: hidden; user-select: none; }
+
+/* ── HEADER ── */
+.topbar { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #1F4E79; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 200; box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+.topbar h1 { font-size: 15px; font-weight: 700; color: white; }
+.topbar p  { font-size: 11px; color: rgba(255,255,255,0.65); }
+.badge { background: rgba(255,255,255,0.15); border-radius: 12px; padding: 3px 12px; font-size: 11px; color: rgba(255,255,255,0.85); font-weight: 600; }
+.hint { font-size: 11px; color: rgba(255,255,255,0.5); margin-left: 16px; }
+
+/* ── CANVAS ── */
+#world { position: fixed; top: 48px; left: 0; right: 340px; bottom: 0; overflow: hidden; cursor: grab; }
+#world.dragging { cursor: grabbing; }
+#pan { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+
+/* ── SVG LINES ── */
+#svg-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+/* ── CARDS ── */
+.card-wrap { position: absolute; width: 200px; }
+.card {
+  background: white; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  cursor: pointer; transition: box-shadow 0.2s, transform 0.15s;
+  border: 2px solid transparent;
+}
+.card:hover { box-shadow: 0 6px 28px rgba(247,200,66,0.3); transform: translateY(-2px); border-color: rgba(247,200,66,0.5); }
+.card.active { border-color: #F7C842; box-shadow: 0 6px 32px rgba(247,200,66,0.5); }
+
+.card-header { padding: 9px 12px; }
+.card-header h3 { font-size: 12px; font-weight: 700; color: white; margin-bottom: 2px; }
+.card-header .meta { font-size: 10px; color: rgba(255,255,255,0.7); }
+.card-body { padding: 8px 10px; background: white; }
+.card-key { font-size: 10px; color: #1F4E79; font-weight: 700; margin-bottom: 3px; }
+.card-row { font-size: 10px; color: #333; margin-bottom: 2px; display: flex; align-items: flex-start; gap: 4px; }
+.card-warn { font-size: 10px; color: #C00000; font-weight: 600; margin-top: 3px; }
+.card-count { font-size: 18px; font-weight: 700; color: white; }
+.card-cols  { font-size: 10px; color: rgba(255,255,255,0.75); }
+
+/* Role colors */
+.role-primary  { background: #1F4E79; }
+.role-core     { background: #2E75B6; }
+.role-financial{ background: #0D5C3A; }
+.role-admin    { background: #6B21A8; }
+.role-reference{ background: #374151; }
+
+/* ── DETAIL PANEL ── */
+#panel {
+  position: fixed; top: 48px; right: 0; width: 340px; bottom: 0;
+  background: #0F1E2E; border-left: 2px solid #1F4E79;
+  overflow-y: auto; z-index: 100;
+  transform: translateX(0); transition: transform 0.3s;
+}
+.panel-inner { padding: 20px 18px; }
+.panel-title { font-size: 16px; font-weight: 700; color: white; margin-bottom: 4px; }
+.panel-file  { font-size: 11px; color: #666; margin-bottom: 16px; font-style: italic; word-break: break-all; }
+.panel-stats { display: flex; gap: 10px; margin-bottom: 16px; }
+.stat-box { flex: 1; background: #1F2D3D; border-radius: 8px; padding: 10px; text-align: center; }
+.stat-num  { font-size: 20px; font-weight: 700; color: white; display: block; }
+.stat-lbl  { font-size: 10px; color: #888; }
+.panel-section { font-size: 11px; font-weight: 700; color: #2E75B6; text-transform: uppercase; letter-spacing: 0.8px; margin: 14px 0 6px; }
+.panel-key  { font-size: 12px; color: #F7C842; font-weight: 700; margin-bottom: 5px; background: rgba(247,200,66,0.08); border-radius: 6px; padding: 5px 8px; }
+.panel-field { font-size: 12px; color: #ccc; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 6px; }
+.panel-field::before { content: "•"; color: #2E75B6; flex-shrink: 0; }
+.panel-issue { font-size: 12px; color: #FCA5A5; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; gap: 6px; }
+.panel-issue::before { content: "⚠"; flex-shrink: 0; }
+.panel-critical { color: #FF6B6B; }
+.panel-use { font-size: 12px; color: #86EFAC; background: rgba(134,239,172,0.08); border-radius: 6px; padding: 6px 10px; margin-top: 8px; line-height: 1.5; }
+.panel-empty { padding: 60px 20px; text-align: center; color: #444; font-size: 14px; line-height: 1.7; }
+.role-pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; color: white; margin-bottom: 12px; }
+
+/* ── LEGEND ── */
+#legend { position: fixed; bottom: 16px; left: 16px; background: rgba(15,30,46,0.95); border: 1px solid #1F4E79; border-radius: 10px; padding: 12px 14px; z-index: 150; }
+#legend h4 { font-size: 10px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; color: #aaa; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.legend-line { width: 24px; height: 2px; flex-shrink: 0; }
+.legend-line.dashed { background: repeating-linear-gradient(to right, #F7C842 0, #F7C842 4px, transparent 4px, transparent 8px); }
+.legend-line.solid { background: #F7C842; }
+
+/* ── ZOOM CONTROLS ── */
+#zoom-ctrl { position: fixed; bottom: 16px; right: 356px; display: flex; gap: 6px; z-index: 150; }
+.zoom-btn { background: #1F4E79; color: white; border: none; width: 32px; height: 32px; border-radius: 8px; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+.zoom-btn:hover { background: #2E75B6; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>FDEM Data Architecture — Dataset Relationships</h1>
+    <p>12 source files · 329,829 total records<span class="hint">· Click any tile to explore · Drag to pan · Scroll to zoom</span></p>
+  </div>
+  <div class="badge">Simeon Global Consulting · June 2026</div>
+</div>
+
+<div id="world">
+  <div id="pan">
+    <svg id="svg-layer" width="2000" height="1100"></svg>
+    <!-- Cards injected by JS -->
+  </div>
+</div>
+
+<div id="panel">
+  <div class="panel-inner">
+    <div class="panel-empty">Click any tile to see<br>full field details,<br>join keys, and<br>data quality notes.</div>
+  </div>
+</div>
+
+<div id="legend">
+  <h4>Legend</h4>
+  <div class="legend-row"><div class="legend-dot" style="background:#1F4E79"></div>Primary / Hub</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#2E75B6"></div>Project Layer</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#0D5C3A"></div>Financial</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#6B21A8"></div>Admin Gate</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#374151"></div>Reference</div>
+  <div style="margin-top:8px; padding-top:8px; border-top:1px solid #1F4E79;">
+  <div class="legend-row"><div class="legend-line solid"></div>Primary join</div>
+  <div class="legend-row"><div class="legend-line dashed"></div>Secondary join</div>
+  </div>
+</div>
+
+<div id="zoom-ctrl">
+  <button class="zoom-btn" onclick="adjustZoom(0.2)">+</button>
+  <button class="zoom-btn" onclick="adjustZoom(-0.2)">−</button>
+  <button class="zoom-btn" onclick="resetView()" title="Reset" style="font-size:13px;">⌂</button>
+</div>
+
+<script>
+// ══ DATA ══
+const DATASETS = [
+  {
+    id: "grants", name: "GRANTS", role: "primary", roleLabel: "PRIMARY HUB",
+    file: "FLPA_Grant_Export_.csv", rows: "60", cols: "73",
+    x: 780, y: 400,
+    keys: ["Grant #  — universal key linking all 12 files", "Program  (PA / FMAG / SPA)"],
+    fields: ["Grant Name, Declared Date, Closed Date","Total Obligated / Total Paid / Total Unpaid","Federal / State / Local Obligated and Paid","Open & Closed Project Count","Open & Closed Account Count","Incident Start Date / Incident End Date","Permanent Work Deadline / Emergency Work Deadline","Generates Quarterly Reports"],
+    issues: ["PoP End Date — 100% null","CFDA Number — 100% null","FSA Date — 100% null","All Lock-in Amount fields (8 cols) — 100% null","State Code / Department ID — 100% null"],
+    usedIn: "All three models (Q1, Q2, Q3). One row per grant. The single source of truth for the portfolio."
+  },
+  {
+    id: "projects", name: "PROJECTS", role: "core", roleLabel: "PROJECT LAYER",
+    file: "FLPA_Projects_Export_.csv", rows: "81,608", cols: "133",
+    x: 380, y: 160,
+    keys: ["Grant # + Proj F#  (compound — use both)", "Grants Portal Org ID  (links to Applicants)"],
+    fields: ["Applicant Name, County, Program","Project Type (Category A through Z)","Project is Obligated / Obligated Date","Project is Closed / FEMA Closed Date","Eligible Amt, Federal Paid, Total Amount Paid","Percent Complete / Work Completed Date","Closeout Step / Project Closeout Status","On Hold (Yes / No)","Is Section 428 Alternative Project","Insurance series — 5900 to 5921 (16 fields)","Is Overpaid (Federal / State), SAM Status","Days Since Completion"],
+    issues: ["Proj S# — 100% NULL — do not use as join key","State Paid % — 100% null","Alternate Procedures — 100% null","7,926 rows: 100% work complete but still admin-open"],
+    usedIn: "Q1 obligation rate calculation. Join on Grant # + Proj F# only. Largest dimension table."
+  },
+  {
+    id: "pwversions", name: "PW VERSIONS", role: "core", roleLabel: "PROJECT LAYER",
+    file: "FLPA_Project_Version_Export_.csv", rows: "132,307", cols: "73",
+    x: 380, y: 600,
+    keys: ["Grant # + Fed #  (compound key)"],
+    fields: ["Status  (Obligated / On Hold / In Review / Complete)","Workflow Step  (1 through 13)","Days Since Step Change / Days Since Last Action","Submission Date  (100% populated)","Last Step Change Date / Last Action Date","Obligated Date, Eligible Amount, Federal Amt","On Hold (Yes / No), Returned","Project Closeout Workflow Step","Created Date, Is Section 428 Alternative","Is Expedited (Y/N), PW Notification Date"],
+    issues: ["Proj S# — 100% null  (do not use)","Federal Notification Date — 100% null","Damage Description / Scope of Work — 100% null","7,608 versions awaiting FEMA determination (step 1)","On-hold median wait: 411 days · Max: 6,260 days"],
+    usedIn: "Q1 obligation queue analysis. Largest file in dataset at 132K rows."
+  },
+  {
+    id: "payables", name: "PAYABLES", role: "financial", roleLabel: "FINANCIAL",
+    file: "FLPA_Payables_Export_.csv", rows: "65,225", cols: "75",
+    x: 1120, y: 180,
+    keys: ["Grant # + Federal Project #"],
+    fields: ["Applicant Name, County, Account Status","Submission Date  (100% populated)","F Warrant Date  (59.4% populated)","Federal Paid Amount, Payment Status","Grant is Closed  (Yes / No)","Is PNP / Is State Agency / UEI Number"],
+    issues: ["F Drawdown Date — 100% null  (critical gap for Q2)","F Warrant Date — 59.4% null","254 negative records  (recaptures / de-obligations)","Median processing lag: 39 days · 95th pct: 451 days"],
+    usedIn: "Primary source for Q2 payment velocity model. Submission Date used as payment timestamp."
+  },
+  {
+    id: "receivables", name: "RECEIVABLES", role: "financial", roleLabel: "FINANCIAL",
+    file: "FLPA_Receivables_Export_.csv", rows: "2,843", cols: "81",
+    x: 1300, y: 430,
+    keys: ["Grant # + Federal Project #"],
+    fields: ["Funds received back from subrecipients","Deobligation and recapture tracking","Account Status  (Active / Closed)","Applicant Name, County, Is State Agency"],
+    issues: ["Must be combined with Payables for net payment view"],
+    usedIn: "Net payment = Payables minus Receivables. Used to validate Q2 payment progress."
+  },
+  {
+    id: "lpc", name: "LARGE PROJECT CLOSEOUTS", role: "admin", roleLabel: "ADMIN GATE",
+    file: "FLPA_Large_Project_Closeout_Export_.csv", rows: "14,263", cols: "53",
+    x: 1120, y: 640,
+    keys: ["Grant # + Federal Project #"],
+    fields: ["LPC Status  (Open / Closed)","Applicant Name, County, Account Status","Project Closeout Status","Grants Portal Org ID"],
+    issues: ["1,714 open records  (12% of total)","No submission or approval date per LPC record","Cannot model LPC processing velocity — counts only","DR-4337: 329 open · DR-4399: 313 open · DR-4834: 112 open"],
+    usedIn: "Open LPC count used in Cox PH model. Not statistically independent (collinear with grant size) but mechanistically is a hard sequential gate — no grant can close with any open LPCs."
+  },
+  {
+    id: "appeals", name: "APPEALS", role: "admin", roleLabel: "ADMIN GATE",
+    file: "FLPA_Appeals_Export_.csv", rows: "2,494", cols: "53",
+    x: 820, y: 810,
+    keys: ["Grant # + Proj #"],
+    fields: ["Appeal Status  (Active / Resolved)","Applicant Name, County, Account Status","Is State Agency, Is PNP","Grants Portal Org ID"],
+    issues: ["125 active appeals  (94.9% resolved overall)","70 appeals at FEMA HQ awaiting determination","No resolution date available for open appeals","Active appeals block LPC resolution"],
+    usedIn: "Statistically significant in Cox PH model. β = -0.0087, p = 0.022. Each open appeal reduces the grant's hazard rate (delays closeout)."
+  },
+  {
+    id: "accountclose", name: "ACCOUNT CLOSEOUTS", role: "admin", roleLabel: "ADMIN GATE",
+    file: "FLPA_Account_Closeouts_.csv", rows: "6,928", cols: "36",
+    x: 430, y: 810,
+    keys: ["Grant # + Applicant Account"],
+    fields: ["Account Status  (Open / Closed)","Program  (PA / FMAG)","County, Applicant FIPS, Grants Portal Org ID"],
+    issues: ["678 accounts still open","Average 5,721 days in system across all records","Final administrative gate before grant closes"],
+    usedIn: "Not directly modeled. Tracked as a downstream indicator of closeout readiness. Sequential dependency on LPC completion."
+  },
+  {
+    id: "applicants", name: "APPLICANTS", role: "reference", roleLabel: "REFERENCE",
+    file: "FLPA_Applicants_Export_.csv", rows: "3,567", cols: "45",
+    x: 90, y: 430,
+    keys: ["Grants Portal Org ID", "FIPS #"],
+    fields: ["Applicant Name, County, Classification","Is PNP / Is State Agency","SAM Status, UEI Number","Address, City"],
+    issues: ["Reference / lookup table — no transaction data","Not directly modeled"],
+    usedIn: "Applicant dimension table. Used to join classification context onto Projects and Payables."
+  },
+  {
+    id: "froc", name: "F-ROC RISK SCORES", role: "reference", roleLabel: "REFERENCE",
+    file: "F-ROC_Scores_06262026.csv", rows: "11,051", cols: "12",
+    x: 140, y: 660,
+    keys: ["Grant Number + Applicant Name"],
+    fields: ["Cat A Score / Cat B Score","Cat C through Z Scores  (9 fields)","Program  (PA)"],
+    issues: ["Cat C through Z — ALL ZERO across all 11,051 rows  (unusable)","Only Cat A and Cat B carry any signal at all","Tested in Cox PH and dropped — insufficient predictive signal"],
+    usedIn: "Evaluated as potential Q3 model covariate. Dropped. Only Cat A/B are usable and their signal is sparse."
+  },
+  {
+    id: "rpa", name: "REIMBURSEMENT REQUESTS", role: "financial", roleLabel: "FINANCIAL",
+    file: "FLPA_RPA_Export_.csv", rows: "9,249", cols: "72",
+    x: 1300, y: 200,
+    keys: ["Grant # + Program"],
+    fields: ["Reimbursement request batches from subrecipients","Approval status and processing dates","County, Applicant details, Account Status"],
+    issues: ["Upstream trigger for Payables entries — RPA approved then flows into Payables"],
+    usedIn: "Not directly modeled. Provides upstream context for Payables processing lag analysis."
+  },
+  {
+    id: "amendments", name: "PROJECT AMENDMENTS", role: "reference", roleLabel: "REFERENCE",
+    file: "FLPA_Project_Amendments_Export_.csv", rows: "3,081", cols: "50",
+    x: 130, y: 230,
+    keys: ["Grant # + Federal Project #"],
+    fields: ["Scope or cost changes to approved PWs","Amendment status and dates","Applicant, County, Program"],
+    issues: ["Amendments extend timelines — not yet incorporated into Q1 model","Phase 3 candidate for improving obligation prediction"],
+    usedIn: "Not modeled in Phase 2. Candidate feature for Phase 3 Q1 model improvement."
+  },
+];
+
+const ROLE_COLORS = {
+  primary: "#1F4E79", core: "#2E75B6", financial: "#0D5C3A",
+  admin: "#6B21A8", reference: "#374151"
+};
+
+// Connections: [from, to, type]
+const CONNECTIONS = [
+  ["grants","projects","solid"],
+  ["grants","pwversions","solid"],
+  ["grants","payables","solid"],
+  ["grants","receivables","solid"],
+  ["grants","lpc","solid"],
+  ["grants","appeals","solid"],
+  ["grants","accountclose","solid"],
+  ["grants","applicants","dashed"],
+  ["grants","froc","dashed"],
+  ["grants","rpa","dashed"],
+  ["grants","amendments","dashed"],
+  ["projects","pwversions","solid"],
+  ["payables","receivables","solid"],
+  ["lpc","appeals","solid"],
+  ["applicants","projects","dashed"],
+  ["rpa","payables","dashed"],
+];
+
+// ══ RENDER CARDS ══
+const CARD_W = 190;
+const pan = document.getElementById("pan");
+const svg = document.getElementById("svg-layer");
+
+function getCardCenter(d) {
+  return { x: d.x + CARD_W/2, y: d.y + 70 };
+}
+
+// Build node map
+const nodeMap = {};
+DATASETS.forEach(d => { nodeMap[d.id] = d; });
+
+// Draw lines first (under cards)
+function drawLines() {
+  svg.innerHTML = "";
+  const defs = document.createElementNS("http://www.w3.org/2000/svg","defs");
+  
+  // Arrow markers
+  ["gold","dashed-gold"].forEach((id,i) => {
+    const m = document.createElementNS("http://www.w3.org/2000/svg","marker");
+    m.setAttribute("id","arr-"+id); m.setAttribute("markerWidth","8"); m.setAttribute("markerHeight","8");
+    m.setAttribute("refX","6"); m.setAttribute("refY","3"); m.setAttribute("orient","auto");
+    const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d","M0,0 L0,6 L8,3 z"); p.setAttribute("fill","#F7C842");
+    m.appendChild(p); defs.appendChild(m);
+  });
+  svg.appendChild(defs);
+
+  CONNECTIONS.forEach(([from,to,type]) => {
+    const a = nodeMap[from], b = nodeMap[to];
+    if (!a || !b) return;
+    const ax = a.x + CARD_W/2, ay = a.y + 70;
+    const bx = b.x + CARD_W/2, by = b.y + 70;
+    
+    // Bezier control points
+    const mx = (ax+bx)/2, my = (ay+by)/2;
+    const dx = bx-ax, dy = by-ay;
+    const perp = 0.25;
+    const cx1 = ax + dx*0.4 - dy*perp;
+    const cy1 = ay + dy*0.4 + dx*perp;
+    const cx2 = bx - dx*0.4 - dy*perp;
+    const cy2 = by - dy*0.4 + dx*perp;
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d",`M${ax},${ay} C${cx1},${cy1} ${cx2},${cy2} ${bx},${by}`);
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke","#F7C842");
+    path.setAttribute("stroke-width", type==="solid"?"2":"1.5");
+    path.setAttribute("opacity", type==="solid"?"0.55":"0.28");
+    if (type==="dashed") path.setAttribute("stroke-dasharray","6,5");
+    path.setAttribute("marker-end","url(#arr-gold)");
+    path.dataset.from = from; path.dataset.to = to;
+    path.classList.add("conn-line");
+    svg.appendChild(path);
+  });
+}
+
+function renderCards() {
+  DATASETS.forEach(d => {
+    const wrap = document.createElement("div");
+    wrap.className = "card-wrap";
+    wrap.style.left = d.x + "px";
+    wrap.style.top  = d.y + "px";
+    wrap.id = "card-" + d.id;
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.onclick = () => selectCard(d.id);
+
+    const hdrEl = document.createElement("div");
+    hdrEl.className = "card-header role-" + d.role;
+    hdrEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <h3>${d.name}</h3>
+        <span class="card-cols">${d.cols} cols</span>
+      </div>
+      <div class="card-count">${d.rows}</div>
+      <div style="font-size:10px;color:rgba(255,255,255,0.65);">rows · ${d.roleLabel}</div>`;
+
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "card-body";
+
+    // Show primary key(s)
+    const keyEl = document.createElement("div");
+    keyEl.className = "card-key";
+    keyEl.textContent = "🔑 " + d.keys[0].split("(")[0].trim();
+    bodyEl.appendChild(keyEl);
+
+    // Show first 2 fields
+    d.fields.slice(0,2).forEach(f => {
+      const r = document.createElement("div");
+      r.className = "card-row";
+      r.innerHTML = `<span style="color:#2E75B6;flex-shrink:0;">·</span>${f}`;
+      bodyEl.appendChild(r);
+    });
+
+    if (d.issues.length > 0) {
+      const w = document.createElement("div");
+      w.className = "card-warn";
+      w.textContent = "⚠ " + d.issues[0].split("—")[0].trim();
+      bodyEl.appendChild(w);
+    }
+
+    card.appendChild(hdrEl);
+    card.appendChild(bodyEl);
+    wrap.appendChild(card);
+    pan.appendChild(wrap);
+  });
+}
+
+// ── SELECTION ──
+let selected = null;
+function selectCard(id) {
+  if (selected) {
+    const prev = document.querySelector("#card-" + selected + " .card");
+    if (prev) prev.classList.remove("active");
+    // Dim previously related lines
+    highlightLines(selected, false);
+  }
+  selected = id;
+  const card = document.querySelector("#card-" + id + " .card");
+  if (card) card.classList.add("active");
+  highlightLines(id, true);
+  showPanel(nodeMap[id]);
+}
+
+function highlightLines(id, on) {
+  document.querySelectorAll(".conn-line").forEach(l => {
+    const isRelated = l.dataset.from === id || l.dataset.to === id;
+    if (on) {
+      l.style.opacity = isRelated ? "0.95" : "0.1";
+      l.style.strokeWidth = isRelated ? "3" : "1";
+    } else {
+      l.style.opacity = "";
+      l.style.strokeWidth = "";
+    }
+  });
+}
+
+function showPanel(d) {
+  const roleColors = { primary:"#1F4E79", core:"#2E75B6", financial:"#0D5C3A", admin:"#6B21A8", reference:"#374151" };
+  const color = roleColors[d.role] || "#374151";
+  let html = `
+    <span class="role-pill" style="background:${color}">${d.roleLabel}</span>
+    <div class="panel-title">${d.name}</div>
+    <div class="panel-file">${d.file}</div>
+    <div class="panel-stats">
+      <div class="stat-box"><span class="stat-num">${d.rows}</span><span class="stat-lbl">Rows</span></div>
+      <div class="stat-box"><span class="stat-num">${d.cols}</span><span class="stat-lbl">Columns</span></div>
+    </div>
+    <div class="panel-section">Join Keys</div>
+    ${d.keys.map(k => `<div class="panel-key">🔑 ${k}</div>`).join("")}
+    <div class="panel-section">Key Fields</div>
+    ${d.fields.map(f => `<div class="panel-field">${f}</div>`).join("")}
+    <div class="panel-section">Data Quality Issues</div>
+    ${d.issues.map(i => `<div class="panel-issue ${i.includes("100%")||i.includes("ALL ZERO")||i.includes("null  (")?"panel-critical":""}">${i}</div>`).join("")}
+    <div class="panel-section">Used In Analysis</div>
+    <div class="panel-use">${d.usedIn}</div>`;
+  document.getElementById("panel").innerHTML = `<div class="panel-inner">${html}</div>`;
+}
+
+// ── PAN + ZOOM ──
+let scale = 1, tx = 40, ty = 20;
+let dragging = false, startX, startY, startTX, startTY;
+const world = document.getElementById("world");
+
+function applyTransform() {
+  pan.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+}
+
+world.addEventListener("mousedown", e => {
+  if (e.target.closest(".card")) return;
+  dragging = true; startX = e.clientX; startY = e.clientY; startTX = tx; startTY = ty;
+  world.classList.add("dragging");
+});
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  tx = startTX + (e.clientX - startX);
+  ty = startTY + (e.clientY - startY);
+  applyTransform();
+});
+window.addEventListener("mouseup", () => { dragging = false; world.classList.remove("dragging"); });
+
+world.addEventListener("wheel", e => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.08 : 0.08;
+  const newScale = Math.min(2, Math.max(0.3, scale + delta));
+  const rect = world.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  tx = mx - (mx - tx) * (newScale/scale);
+  ty = my - (my - ty) * (newScale/scale);
+  scale = newScale;
+  applyTransform();
+}, { passive: false });
+
+function adjustZoom(delta) {
+  scale = Math.min(2, Math.max(0.3, scale + delta));
+  applyTransform();
+}
+
+function resetView() {
+  scale = 0.85; tx = 40; ty = 20;
+  applyTransform();
+  if (selected) {
+    const prev = document.querySelector("#card-" + selected + " .card");
+    if (prev) prev.classList.remove("active");
+    highlightLines(selected, false);
+    selected = null;
+    document.getElementById("panel").innerHTML = `<div class="panel-inner"><div class="panel-empty">Click any tile to see<br>full field details,<br>join keys, and<br>data quality notes.</div></div>`;
+  }
+}
+
+// ── INIT ──
+drawLines();
+renderCards();
+applyTransform();
+</script>
+</body>
+</html>
